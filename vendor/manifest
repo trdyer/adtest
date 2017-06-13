@@ -1,0 +1,41 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "github.com/jtblin/go-ldap-client",
+			"repository": "https://github.com/jtblin/go-ldap-client",
+			"vcs": "git",
+			"revision": "b73f66626b33ca4ac4fd6558efbb062c4fe4e52c",
+			"branch": "master",
+			"notests": true,
+			"allfiles": true
+		},
+		{
+			"importpath": "github.com/paleg/libadclient",
+			"repository": "https://github.com/paleg/libadclient",
+			"vcs": "git",
+			"revision": "893fc6c704e477db11e89e3a11ad0f16b0b7b12f",
+			"branch": "master",
+			"notests": true,
+			"allfiles": true
+		},
+		{
+			"importpath": "gopkg.in/asn1-ber.v1",
+			"repository": "https://gopkg.in/asn1-ber.v1",
+			"vcs": "git",
+			"revision": "379148ca0225df7a432012b8df0355c2a2063ac0",
+			"branch": "master",
+			"notests": true,
+			"allfiles": true
+		},
+		{
+			"importpath": "gopkg.in/ldap.v2",
+			"repository": "https://gopkg.in/ldap.v2",
+			"vcs": "git",
+			"revision": "8168ee085ee43257585e50c6441aadf54ecb2c9f",
+			"branch": "master",
+			"notests": true,
+			"allfiles": true
+		}
+	]
+}

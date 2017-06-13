@@ -10,23 +10,23 @@ import (
 )
 
 func main() {
-	// main2("test.corp")
-	// main2("bt1.com")
+	main2("test.corp", "username", "password")
+	main2("other.test.corp", "username", "password")
 	main3()
 
 }
 
 // swagger:route GET /api/stuff
-func main2(domain string) {
+func main2(domain, username, password string) {
 	libadclient.New()
 	defer libadclient.Delete()
 
 	params := libadclient.DefaultADConnParams()
 	// login with a domain name
-	params.Domain = "test.corp"
+	params.Domain = domain
 	params.Secured = false
-	params.Binddn = "<username>"
-	params.Bindpw = "<password>"
+	params.Binddn = username
+	params.Bindpw = password
 
 	params.Timelimit = 60
 	params.Nettimeout = 60

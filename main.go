@@ -10,56 +10,55 @@ import (
 
 func main() {
 
-	demoMode("redacted", "redacted", "redacted")
-	demoMode("redacted", "redacted", "redacted")
+	demoMode("redacted", "redacted", "redacted", "redacted", "redacted")
+	demoMode("redacted", "redacted", "redacted", "redacted", "redacted")
 
 }
 
 const DC_SEPERATOR = ",dc="
 
-func demoMode(domain, username, password string) {
+type LdapDemo struct {
+	conn         *ldap.Conn
+	domain       string
+	port         int64
+	searchBase   string
+	binduser     string
+	bindpassword string
+}
 
+func NewLdapDemo(domain string, port int64, username string, password string) *LdapDemo {
 	domainParts := strings.Split(domain, ".")
 	searchBase := fmt.Sprintf("dc=%s", strings.Join(domainParts, DC_SEPERATOR))
-	log.Printf("searchbase is %s", searchBase)
-
-	log.Printf("dialing to ldap %s", domain)
-	l, err := connectToAD(domain, 389, username, password)
-	if err != nil {
-		log.Fatal(err)
+	return &LdapDemo{
+		domain:       domain,
+		port:         port,
+		searchBase:   searchBase,
+		binduser:     username,
+		bindpassword: password,
 	}
-	defer l.Close()
-
-	log.Printf("bound as %v\n", username)
-
-	log.Printf("\nsearching for %s\n", username)
-	returnedUser := searchForUser(l, username, searchBase)
-
-	searchForGroupsThatUserBelongsTo(l, returnedUser.DN, searchBase)
-
-	log.Println("getting top level OU's")
-
-	searchforOUs(l, searchBase, "")
-
-	log.Println("closing the connection")
 }
 
-func connectToAD(domain string, port int64, username string, password string) (l *ldap.Conn, err error) {
-	l, err = ldap.Dial("tcp", fmt.Sprintf("%s:%d", domain, 389))
+func (demo *LdapDemo) ConnectToAD() error {
+	l, err := ldap.Dial("tcp", fmt.Sprintf("%s:%d", demo.domain, demo.port))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	err = l.Bind(fmt.Sprintf("%s@%s", username, domain), password)
-	if err != nil {
-		return nil, err
-	}
-	return l, nil
+	demo.conn = l
+	demo.bindAsReadOnlyUser()
+	return nil
 }
 
-func searchForUser(l *ldap.Conn, username string, searchBase string) *ldap.Entry {
+func (demo *LdapDemo) Disconnect() {
+	demo.conn.Close()
+}
+
+func (demo *LdapDemo) searchForUser(username string, searchBase string) *ldap.Entry {
+	if searchBase == "" {
+		searchBase = demo.searchBase
+	}
 	search := ldap.NewSearchRequest(searchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, fmt.Sprintf("(sAMAccountName=%s)", username), []string{"cn", "givenName", "sn", "mail", "uid", "dn", "memberOf"}, nil)
 
-	searchResults, err := l.Search(search)
+	searchResults, err := demo.conn.Search(search)
 
 	if err != nil {
 		panic(err)
@@ -69,10 +68,13 @@ func searchForUser(l *ldap.Conn, username string, searchBase string) *ldap.Entry
 	return searchResults.Entries[0]
 }
 
-func searchForGroupsThatUserBelongsTo(l *ldap.Conn, searchdn string, searchBase string) {
+func (demo *LdapDemo) searchForGroupsThatUserBelongsTo(searchdn string, searchBase string) {
+	if searchBase == "" {
+		searchBase = demo.searchBase
+	}
 	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, fmt.Sprintf("(&(objectClass=group)(member=%s))", searchdn), []string{"dn", "cn", "ou"}, nil)
 
-	sr, err := l.Search(searchRequest)
+	sr, err := demo.conn.Search(searchRequest)
 	if err != nil {
 		panic(err)
 	}
@@ -85,11 +87,13 @@ func searchForGroupsThatUserBelongsTo(l *ldap.Conn, searchdn string, searchBase 
 	}
 }
 
-func searchforOUs(l *ldap.Conn, searchBase string, indentlevel string) []*ldap.Entry {
-
+func (demo *LdapDemo) searchforOUs(searchBase string, indentlevel string) []*ldap.Entry {
+	if searchBase == "" {
+		searchBase = demo.searchBase
+	}
 	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeSingleLevel, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=organizationalUnit)", []string{"dn", "cn", "ou"}, nil)
 
-	sr, err := l.Search(searchRequest)
+	sr, err := demo.conn.Search(searchRequest)
 	if err != nil {
 		panic(err)
 	}
@@ -98,16 +102,19 @@ func searchforOUs(l *ldap.Conn, searchBase string, indentlevel string) []*ldap.E
 		ou := entry.GetAttributeValue("ou")
 		log.Printf("%sfound ou %s", indentlevel, ou)
 		// log.Printf("\t%sget child groups of ou: %s", indentlevel, ou)
-		getChildGroups(l, entry.DN, indentlevel)
+		demo.getChildGroups(entry.DN, indentlevel)
 		// log.Printf("\t%sgetting child OU's of %s", indentlevel, ou)
-		searchforOUs(l, entry.DN, fmt.Sprintf("\t%s", indentlevel))
+		demo.searchforOUs(entry.DN, fmt.Sprintf("\t%s", indentlevel))
 	}
 	return sr.Entries
 }
 
-func getChildGroups(l *ldap.Conn, searchBase string, indentlevel string) []*ldap.Entry {
+func (demo *LdapDemo) getChildGroups(searchBase string, indentlevel string) []*ldap.Entry {
+	if searchBase == "" {
+		searchBase = demo.searchBase
+	}
 	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeSingleLevel, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=group)", []string{"dn", "cn", "ou"}, nil)
-	sr, err := l.Search(searchRequest)
+	sr, err := demo.conn.Search(searchRequest)
 	if err != nil {
 		panic(err)
 	}
@@ -117,4 +124,67 @@ func getChildGroups(l *ldap.Conn, searchBase string, indentlevel string) []*ldap
 		log.Printf("\t%sfound group %s", indentlevel, cn)
 	}
 	return sr.Entries
+}
+
+func (demo *LdapDemo) authenticateUser(searchBase, username, password string) error {
+	if searchBase == "" {
+		searchBase = demo.searchBase
+	}
+	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, fmt.Sprintf("(sAMAccountName=%s)", username), []string{"dn"}, nil)
+
+	sr, err := demo.conn.Search(searchRequest)
+	if err != nil {
+		return err
+	}
+
+	if len(sr.Entries) != 1 {
+		return fmt.Errorf("User %s does not exist or too many entries returned", username)
+	}
+
+	userdn := sr.Entries[0].DN //GetAttributeValue("userPrincipalName")
+
+	// Bind as the user to verify their password
+	err = demo.conn.Bind(userdn, demo.bindpassword)
+
+	defer demo.bindAsReadOnlyUser()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (demo *LdapDemo) bindAsReadOnlyUser() error {
+	// Rebind as the read only user for any futher queries
+	return demo.conn.Bind(fmt.Sprintf("%s@%s", demo.binduser, demo.domain), demo.bindpassword)
+}
+
+func demoMode(domain string, username string, password string, testuser string, othertestuser string) {
+
+	ldapdemo := NewLdapDemo(domain, 389, username, password)
+
+	log.Printf("dialing to ldap %s", domain)
+	err := ldapdemo.ConnectToAD()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ldapdemo.Disconnect()
+
+	returnedUser := ldapdemo.searchForUser(username, "")
+
+	ldapdemo.searchForGroupsThatUserBelongsTo(returnedUser.DN, "")
+	ldapdemo.searchforOUs("", "")
+
+	err = ldapdemo.authenticateUser("", testuser, "Password1")
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Printf("successfully authenticated as user: %s", testuser)
+	}
+
+	err = ldapdemo.authenticateUser("", othertestuser, "Password1")
+	if err != nil {
+		log.Println(err)
+	}
 }

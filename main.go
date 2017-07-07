@@ -3,17 +3,25 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	ldap "gopkg.in/ldap.v2"
 )
 
 func main() {
-	domain := "redacted"
-	searchBase := "dc=redacted,dc=redacted"
-	username := "redacted"
-	password := "redacted"
 
-	searchusername := "jsmith"
+	demoMode("redacted", "redacted", "redacted")
+	demoMode("redacted", "redacted", "redacted")
+
+}
+
+const DC_SEPERATOR = ",dc="
+
+func demoMode(domain, username, password string) {
+
+	domainParts := strings.Split(domain, ".")
+	searchBase := fmt.Sprintf("dc=%s", strings.Join(domainParts, DC_SEPERATOR))
+	log.Printf("searchbase is %s", searchBase)
 
 	log.Printf("dialing to ldap %s", domain)
 	l, err := connectToAD(domain, 389, username, password)
@@ -24,8 +32,8 @@ func main() {
 
 	log.Printf("bound as %v\n", username)
 
-	log.Printf("\nsearching for %s\n", searchusername)
-	returnedUser := searchForUser(l, searchusername, searchBase)
+	log.Printf("\nsearching for %s\n", username)
+	returnedUser := searchForUser(l, username, searchBase)
 
 	searchForGroupsThatUserBelongsTo(l, returnedUser.DN, searchBase)
 

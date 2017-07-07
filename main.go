@@ -5,88 +5,108 @@ import (
 	"log"
 
 	ldap "gopkg.in/ldap.v2"
-
-	libadclient "github.com/paleg/libadclient"
 )
 
 func main() {
-	main2("test.corp", "username", "password")
-	main2("other.test.corp", "username", "password")
-	main3()
+	domain := "redacted"
+	searchBase := "dc=redacted,dc=redacted"
+	username := "redacted"
+	password := "redacted"
 
-}
+	searchusername := "jsmith"
 
-// swagger:route GET /api/stuff
-func main2(domain, username, password string) {
-	libadclient.New()
-	defer libadclient.Delete()
-
-	params := libadclient.DefaultADConnParams()
-	// login with a domain name
-	params.Domain = domain
-	params.Secured = false
-	params.Binddn = username
-	params.Bindpw = password
-
-	params.Timelimit = 60
-	params.Nettimeout = 60
-	fmt.Printf("------------- login to %v --------------------\n", domain)
-	if err := libadclient.Login(params); err != nil {
-		fmt.Printf("Failed to AD login: %v\n", err)
-		return
-	}
-	fmt.Println("------------- get ous --------------------")
-	getOUs()
-	fmt.Println("------------- get groups --------------------")
-	getGroups()
-	fmt.Println("------------- finished --------------------")
-}
-
-func main3() {
-	domain := "test.corp"
-	search_base := "dc=test,dc=corp"
-	username := "<username>"
-	password := "<password>"
-
-	bindusername := "<readonly username>"
-	bindpassword := "<readonly password>"
-
-	log.Println("dialing to ldap")
-	l, err := ldap.Dial("tcp", fmt.Sprintf("%s:%d", domain, 389))
+	log.Printf("dialing to ldap %s", domain)
+	l, err := connectToAD(domain, 389, username, password)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer l.Close()
 
-	l.Debug = false
-	log.Println("dialed to ldap")
+	log.Printf("bound as %v\n", username)
 
-	// First bind with a read only user
-	err = l.Bind(fmt.Sprintf("%s@%s", bindusername, domain), bindpassword)
+	log.Printf("\nsearching for %s\n", searchusername)
+	returnedUser := searchForUser(l, searchusername, searchBase)
+
+	searchForGroupsThatUserBelongsTo(l, returnedUser.DN, searchBase)
+
+	log.Println("getting top level OU's")
+
+	searchforOUs(l, searchBase, "")
+
+	log.Println("closing the connection")
+}
+
+func connectToAD(domain string, port int64, username string, password string) (l *ldap.Conn, err error) {
+	l, err = ldap.Dial("tcp", fmt.Sprintf("%s:%d", domain, 389))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	log.Printf("bound as %v\n", bindusername)
-
-	// Rebind as the read only user for any futher queries
 	err = l.Bind(fmt.Sprintf("%s@%s", username, domain), password)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	log.Printf("bound as %v\n", username)
-	searchRequest := ldap.NewSearchRequest(search_base, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 5, 0, false, fmt.Sprintf("(memberUid=%s)", username), []string{"dn"}, nil)
+	return l, nil
+}
+
+func searchForUser(l *ldap.Conn, username string, searchBase string) *ldap.Entry {
+	search := ldap.NewSearchRequest(searchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, fmt.Sprintf("(sAMAccountName=%s)", username), []string{"cn", "givenName", "sn", "mail", "uid", "dn", "memberOf"}, nil)
+
+	searchResults, err := l.Search(search)
+
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("\nnumber of entries: %d\n", len(searchResults.Entries))
+	searchResults.Print()
+	return searchResults.Entries[0]
+}
+
+func searchForGroupsThatUserBelongsTo(l *ldap.Conn, searchdn string, searchBase string) {
+	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, fmt.Sprintf("(&(objectClass=group)(member=%s))", searchdn), []string{"dn", "cn", "ou"}, nil)
 
 	sr, err := l.Search(searchRequest)
 	if err != nil {
 		panic(err)
 	}
 	// groups := []string{}
-	fmt.Printf("looking for groups for user: %s\n", username)
-	sr.Print()
+	log.Printf("\nlooking for groups for user: %s\n", searchdn)
+	// sr.Print()
 	for _, entry := range sr.Entries {
 		group := entry.GetAttributeValue("cn")
-		fmt.Printf("user %s is in group %s", username, group)
+		log.Printf("\t\t\tuser %s is in group %v", searchdn, group)
 	}
+}
 
-	l.Close()
-	log.Println("closed the connection")
+func searchforOUs(l *ldap.Conn, searchBase string, indentlevel string) []*ldap.Entry {
+
+	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeSingleLevel, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=organizationalUnit)", []string{"dn", "cn", "ou"}, nil)
+
+	sr, err := l.Search(searchRequest)
+	if err != nil {
+		panic(err)
+	}
+	// sr.Print()
+	for _, entry := range sr.Entries {
+		ou := entry.GetAttributeValue("ou")
+		log.Printf("%sfound ou %s", indentlevel, ou)
+		// log.Printf("\t%sget child groups of ou: %s", indentlevel, ou)
+		getChildGroups(l, entry.DN, indentlevel)
+		// log.Printf("\t%sgetting child OU's of %s", indentlevel, ou)
+		searchforOUs(l, entry.DN, fmt.Sprintf("\t%s", indentlevel))
+	}
+	return sr.Entries
+}
+
+func getChildGroups(l *ldap.Conn, searchBase string, indentlevel string) []*ldap.Entry {
+	searchRequest := ldap.NewSearchRequest(searchBase, ldap.ScopeSingleLevel, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=group)", []string{"dn", "cn", "ou"}, nil)
+	sr, err := l.Search(searchRequest)
+	if err != nil {
+		panic(err)
+	}
+	// sr.Print()
+	for _, entry := range sr.Entries {
+		cn := entry.GetAttributeValue("cn")
+		log.Printf("\t%sfound group %s", indentlevel, cn)
+	}
+	return sr.Entries
 }
